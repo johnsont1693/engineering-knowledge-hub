@@ -1,0 +1,14 @@
+{
+  "name": "commit-pinned-engineering-knowledge-cli",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "bin": {
+    "engineering-knowledge": "./src/cli.mjs"
+  }
+}

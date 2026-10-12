@@ -1,0 +1,79 @@
+name: Commit-pinned index check
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full 40-character commit SHA to inspect in this repository
+        required: true
+        type: string
+      config_file:
+        description: Relative path to the reviewed single-repository config at source_commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pinned-source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the requested immutable source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Ingest and validate only the pinned checkout
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          CONFIG_FILE: ${{ inputs.config_file }}
+        run: |
+          $sha = $env:SOURCE_COMMIT
+          if ($sha -notmatch '^[0-9a-f]{40}$') {
+            throw 'source_commit must be a full lowercase 40-character SHA.'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $sha) {
+            throw "Checkout mismatch: requested $sha, received $actual."
+          }
+          if ((node -p 'process.versions.node.split(".")[0]') -ne '24') {
+            throw 'Node.js 24 is required.'
+          }
+          $root = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          $prefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+          $config = [IO.Path]::GetFullPath((Join-Path $root $env:CONFIG_FILE))
+          if (-not $config.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The config path must remain inside the checked-out repository.'
+          }
+          $configuration = Get-Content -Raw $config | ConvertFrom-Json
+          if ($configuration.repositories.Count -ne 1) {
+            throw 'This per-repository workflow accepts exactly one repository mapping.'
+          }
+          $repository = $configuration.repositories[0]
+          if ($repository.checkout -ne '.' -or $repository.commit -cne $sha) {
+            throw 'The config must map checkout "." to the exact dispatched source_commit.'
+          }
+          $cli = Join-Path (Join-Path (Join-Path $root 'design-1') 'src') 'cli.mjs'
+          if (-not (Test-Path $cli)) {
+            throw 'Install the reviewed Design 1 CLI and shared core at the documented repository root before enabling this template.'
+          }
+          $output = Join-Path $env:RUNNER_TEMP 'design1-index-validation.json'
+          try {
+            & node $cli ingest --config $config --output $output
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned ingestion failed.' }
+            & node $cli validate --index $output
+            if ($LASTEXITCODE -ne 0) { throw 'Generated index validation failed.' }
+          }
+          finally {
+            if (Test-Path $output) { Remove-Item $output -Force }
+          }
+          Write-Output 'The generated index stayed in RUNNER_TEMP and was removed after validation. No application source/tests/builds were run, no artifact was uploaded, and no commit or pull request was created.'

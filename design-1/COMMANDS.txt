@@ -1,0 +1,84 @@
+DESIGN 1 COMMANDS
+=================
+
+Requirements: Node.js 24, and the shared core at
+..\core\index.mjs. Run commands from this design-1 directory.
+
+1. Create or update a human-owned config entry (all values are explicit; no
+   repository/app names are inferred):
+
+   node .\src\cli.mjs onboard --config .\knowledge-config.json --id <repo-id> --display-name "<name>" --checkout "<local-checkout>" --commit <40-char-sha> --access-group <group> --include-path "README.md" --include-path "src/**/*.py"
+
+   Repeat onboard once per repo. The local config maps repos to access groups.
+   --include-path can be repeated; patterns are repo-relative and passed to the
+   core before it reads Git blob sizes or contents. Review the exact allowed
+   paths and add no broad wildcards unless the source owner approves them.
+   An optional applications array may be edited by its human owner:
+   [{"id":"<id>","name":"<human name>","repositoryIds":["<repo-id>"],"status":"draft"}]
+   Use status "approved" only after human review. No model output is a policy
+   approval. Repository IDs and application IDs are separate concepts.
+
+2. Ingest exact commits and write an index locally:
+
+   node .\src\cli.mjs ingest --config .\knowledge-config.json --output .\engineering-knowledge.index.json
+
+   Ingest passes checkout paths and pinned SHAs to core.ingestRepositories.
+   Core resolves and verifies source objects locally. It must not fetch, switch
+   branches, execute repository code, install dependencies, or read a worktree in
+   place of the pinned commit. Index/evidence changes are ordinary, inspectable
+   files; humans decide whether to commit them. Do not commit proprietary content
+   unless the repository's own access and retention rules permit it.
+
+3. Literal lexical search with complete citations:
+
+   node .\src\cli.mjs query --index .\engineering-knowledge.index.json --question "literal terms" --access-group <group>
+
+   Add repeated --access-group flags only for groups authorized in the current
+   operating boundary. Optionally narrow using --repository-id. The CLI sends
+   only authorized repository records, facts, chunks, and mappings to core.
+   Results are literal token/substring matches, not semantic answers. The
+   output preserves core citations and its coverage/truncation status. When
+   --max-output-bytes is exceeded, results are omitted and explicitly marked
+   partial; citations are never silently clipped. The CLI does not set a
+   top-N bound. Any core-reported truncation or incomplete source is surfaced
+   as partial, never represented as a complete result set.
+
+4. Deterministic fact comparison:
+
+   node .\src\cli.mjs compare --index .\engineering-knowledge.index.json --kind <kind> --access-group <group>
+   node .\src\cli.mjs compare --index .\engineering-knowledge.index.json --kind <kind> --name <name> --access-group <group>
+
+   Compare uses only extracted, source-cited facts (including dependency,
+   route, language, and workflow facts present in the index). Missing evidence
+   remains unknown; absence is not a negative finding.
+
+5. Repository profile and index validation:
+
+   node .\src\cli.mjs profile --index .\engineering-knowledge.index.json --repository-id <repo-id> --access-group <group>
+   node .\src\cli.mjs validate --index .\engineering-knowledge.index.json
+
+Run the unit tests from this directory:
+
+   npm test
+
+The unit tests do not access external repositories or bundle a source index.
+
+The local access-group option is a fail-closed data filter, not identity
+authentication. Restrict filesystem/shell access to the intended operators and
+invoke the CLI only within an approved access boundary. No GitHub identity,
+authorization, MCP connection, or cloud service is established by this POC.
+
+GitHub Actions template:
+  .github\workflows\commit-pinned-index-check.yml
+
+An administrator must manually install/review the template at the actual
+repository root and place the reviewed CLI/core at the path expected by its
+workflow. The manually dispatched workflow checks out the requested exact SHA,
+reads a human-reviewed config from that checkout, and runs only Design 1/core
+ingestion plus validation. It writes its index to RUNNER_TEMP and removes it
+after validation; it does not run application code, upload artifacts, commit
+changes, or open a PR. Create the regular, human-reviewed index change locally
+with the CLI. Each external
+private repository must run its own authorized workflow or use another approved
+access boundary. This template does not fetch across private repositories and
+does not have a cross-repository token.
